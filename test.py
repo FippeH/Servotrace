@@ -1,0 +1,290 @@
+import re
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+import tkinter as tk
+from tkinter import filedialog, ttk
+
+# ---------------------------------------------------------
+#  PARSER
+# ---------------------------------------------------------
+def parse_st_file(path):
+    traces = {}
+    current_trace = None
+    in_measurements = False
+
+    number_regex = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)"
+
+    with open(path, encoding="latin-1") as f:
+        for raw in f:
+            line = raw.strip()
+
+            if line.startswith("@Parameter Trace:"):
+                current_trace = int(line.split(":")[1])
+                traces[current_trace] = {"params": {}, "idx": [], "val": []}
+                in_measurements = False
+
+            elif line.startswith("@Messwerte Trace:"):
+                current_trace = int(line.split(":")[1])
+                in_measurements = True
+
+            elif line.startswith("P ") and ":" in line and not in_measurements:
+                m = re.match(rf"P\s+(\d+):\s*({number_regex}|.+)", line)
+                if m:
+                    p_no = int(m.group(1))
+                    val_raw = m.group(2).strip()
+                    try:
+                        val = float(val_raw.replace(",", "."))
+                    except ValueError:
+                        val = val_raw
+                    traces[current_trace]["params"][p_no] = val
+
+            elif in_measurements and line.startswith("M "):
+                m = re.match(rf"M\s+(\d+):\s*({number_regex})", line)
+                if m:
+                    idx = int(m.group(1))
+                    val = float(m.group(2))
+                    traces[current_trace]["idx"].append(idx)
+                    traces[current_trace]["val"].append(val)
+
+    # Sortera samples
+    for tr in traces.values():
+        if tr["idx"]:
+            arr = np.array(sorted(zip(tr["idx"], tr["val"])))
+            tr["idx"] = arr[:, 0].astype(int)
+            tr["val"] = arr[:, 1].astype(float)
+        else:
+            tr["idx"] = np.array([], dtype=int)
+            tr["val"] = np.array([], dtype=float)
+
+    return traces
+
+# ---------------------------------------------------------
+#  GUI
+# ---------------------------------------------------------
+class TraceViewer(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Servotrace Veiwer (840D PL) V0.1 -- Skapad av Filip Haverinen")
+        self.geometry("1500x900")
+
+        self.traces_a = {}
+        self.traces_b = {}
+        self.trace_vars = {}
+        self.colors = {}
+
+        style = ttk.Style()
+        style.configure("Big.TCheckbutton", font=("Segoe UI", 14))
+
+        self.create_widgets()
+
+    # ---------------------------------------------------------
+    #  UI
+    # ---------------------------------------------------------
+    def create_widgets(self):
+        top = ttk.Frame(self)
+        top.pack(fill="x", pady=5)
+
+        ttk.Button(top, text="Öppna ST-fil A", command=lambda: self.open_file("A")).pack(side="left", padx=10)
+        ttk.Button(top, text="Öppna ST-fil B", command=lambda: self.open_file("B")).pack(side="left", padx=10)
+
+        ttk.Button(top, text="Stäng alla A", command=lambda: self.close_file("A")).pack(side="left", padx=10)
+        ttk.Button(top, text="Stäng alla B", command=lambda: self.close_file("B")).pack(side="left", padx=10)
+        ttk.Button(top, text="Stäng ALLT", command=self.close_all).pack(side="left", padx=10)
+
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill="both", expand=True)
+
+        self.left_panel = ttk.Frame(main_frame, width=300)
+        self.left_panel.pack(side="left", fill="y")
+
+        self.plot_frame = ttk.Frame(main_frame)
+        self.plot_frame.pack(side="right", fill="both", expand=True)
+
+        self.text_output = tk.Text(self, height=10, bg="#111", fg="#0f0", font=("Consolas", 10))
+        self.text_output.pack(fill="x", padx=10, pady=5)
+
+    def log(self, msg):
+        self.text_output.insert("end", msg + "\n")
+        self.text_output.see("end")
+
+    # ---------------------------------------------------------
+    #  Öppna fil
+    # ---------------------------------------------------------
+    def open_file(self, label):
+        filepath = filedialog.askopenfilename(
+            title=f"Välj ST-fil {label}",
+            filetypes=[("ST filer", "*.ST1 *.ST2"), ("Alla filer", "*.*")]
+        )
+        if not filepath:
+            return
+
+        self.log(f"Läser fil {label}: {filepath}")
+
+        if label == "A":
+            self.traces_a = parse_st_file(filepath)
+        else:
+            self.traces_b = parse_st_file(filepath)
+
+        self.update_checkboxes()
+        self.update_plot()
+
+    # ---------------------------------------------------------
+    #  Stäng enskild trace
+    # ---------------------------------------------------------
+    def close_single_trace(self, label, trace_no):
+        if label == "A" and trace_no in self.traces_a:
+            del self.traces_a[trace_no]
+            self.log(f"Stängde A: Trace {trace_no}")
+
+        if label == "B" and trace_no in self.traces_b:
+            del self.traces_b[trace_no]
+            self.log(f"Stängde B: Trace {trace_no}")
+
+        self.update_checkboxes()
+        self.update_plot()
+
+    # ---------------------------------------------------------
+    #  Stäng alla i en fil
+    # ---------------------------------------------------------
+    def close_file(self, label):
+        if label == "A":
+            self.traces_a = {}
+            self.log("Stängde alla A-traces.")
+        else:
+            self.traces_b = {}
+            self.log("Stängde alla B-traces.")
+
+        self.update_checkboxes()
+        self.update_plot()
+
+    # ---------------------------------------------------------
+    #  Stäng ALLT
+    # ---------------------------------------------------------
+    def close_all(self):
+        self.traces_a = {}
+        self.traces_b = {}
+        self.log("Stängde ALLA traces.")
+        self.update_checkboxes()
+        self.update_plot()
+
+    # ---------------------------------------------------------
+    #  Checkbox-lista
+    # ---------------------------------------------------------
+    def update_checkboxes(self):
+        for widget in self.left_panel.winfo_children():
+            widget.destroy()
+
+        self.trace_vars.clear()
+        self.colors.clear()
+
+        all_traces = []
+
+        for tr in sorted(self.traces_a.keys()):
+            all_traces.append(("A", tr, self.traces_a[tr]))
+
+        for tr in sorted(self.traces_b.keys()):
+            all_traces.append(("B", tr, self.traces_b[tr]))
+
+        for i, (label, trace_no, tr) in enumerate(all_traces):
+            row = ttk.Frame(self.left_panel)
+            row.pack(anchor="w", padx=10, pady=3, fill="x")
+
+            var = tk.BooleanVar(value=True)
+
+            cb = ttk.Checkbutton(
+                row,
+                text=f"{label}: Trace {trace_no}",
+                variable=var,
+                command=self.update_plot,
+                style="Big.TCheckbutton"
+            )
+            cb.pack(side="left")
+
+            # X-knapp för att stänga en trace
+            btn = ttk.Button(
+                row,
+                text="X",
+                width=3,
+                command=lambda L=label, T=trace_no: self.close_single_trace(L, T)
+            )
+            btn.pack(side="right", padx=5)
+
+            self.trace_vars[(label, trace_no)] = var
+            self.colors[(label, trace_no)] = plt.cm.tab20(i % 20)
+
+    # ---------------------------------------------------------
+    #  Rita graf
+    # ---------------------------------------------------------
+    def update_plot(self):
+        for widget in self.plot_frame.winfo_children():
+            widget.destroy()
+
+        fig = plt.Figure(figsize=(12, 6), dpi=100)
+        ax = fig.add_subplot(111)
+
+        any_plotted = False
+
+        # Rita A
+        for trace_no, tr in self.traces_a.items():
+            key = ("A", trace_no)
+            if key in self.trace_vars and self.trace_vars[key].get():
+                self.plot_trace(ax, tr, trace_no, "A", self.colors[key])
+                any_plotted = True
+
+        # Rita B
+        for trace_no, tr in self.traces_b.items():
+            key = ("B", trace_no)
+            if key in self.trace_vars and self.trace_vars[key].get():
+                self.plot_trace(ax, tr, trace_no, "B", self.colors[key])
+                any_plotted = True
+
+        if any_plotted:
+            ax.grid(True)
+            ax.legend()
+
+        canvas = FigureCanvasTkAgg(fig, master=self.plot_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        toolbar = NavigationToolbar2Tk(canvas, self.plot_frame)
+        toolbar.update()
+        toolbar.pack(side="bottom", fill="x")
+
+    # ---------------------------------------------------------
+    #  Rita en trace
+    # ---------------------------------------------------------
+    def plot_trace(self, ax, tr, trace_no, label, color):
+        params = tr["params"]
+        val = tr["val"]
+
+        if len(val) == 0:
+            return
+
+        p_keys = [k for k in params.keys() if isinstance(k, int)]
+        block = (min(p_keys) // 100) * 100
+
+        axis_id = params.get(block + 2, "N/A")
+        ymax    = params.get(block + 8, None)
+        ymin    = params.get(block + 9, None)
+        unit    = params.get(block + 10, "")
+
+        total_ms = params.get(block + 13, len(val))
+        Ts_ms = total_ms / len(val)
+        Ts_s = Ts_ms / 1000.0
+        t = np.arange(len(val)) * Ts_s
+
+        ax.plot(
+            t, val,
+            label=f"{label}: Trace {trace_no} – {axis_id} [{unit}]",
+            color=color
+        )
+
+        self.log(
+            f"{label}: Trace {trace_no} | Axel={axis_id} | Enhet={unit} | "
+            f"Ymin={ymin} | Ymax={ymax} | Samples={len(val)} | Ts={Ts_ms:.6f} ms"
+        )
+
+if __name__ == "__main__":
+    app = TraceViewer()
+    app.mainloop()
