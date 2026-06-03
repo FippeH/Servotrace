@@ -14,8 +14,8 @@ import requests
 #  KONFIG
 # ---------------------------------------------------------
 path = "_internal\\version.json"
-GITHUB_OWNER = "Servotrace"
-GITHUB_REPO = "FippeH"
+GITHUB_OWNER = "FippeH"
+GITHUB_REPO = "Servotrace"
 
 # ---------------------------------------------------------
 #  HJÄLPFUNKTION: KÖR VI SOM EXE?
@@ -75,6 +75,7 @@ def load_version_info():
     return "unknown", "no summary"
 
 version, summary = load_version_info()
+print(version, summary)
 
 # ---------------------------------------------------------
 #  HÄMTA SENASTE VERSION FRÅN GITHUB
@@ -83,7 +84,7 @@ def get_latest_github_version(owner, repo):
     url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
     response = requests.get(url, timeout=5)
     data = response.json()
-    return data["tag_name"], data["html_url"]
+    return data["name"], data["html_url"]
 
 def check_for_update(local_version, owner, repo):
     try:
@@ -372,10 +373,6 @@ class TraceViewer(tk.Tk):
             f"Ymin={ymin} | Ymax={ymax} | Samples={len(val)} | Ts={Ts_ms:.6f} ms"
         )
 
-
-# ---------------------------------------------------------
-#  STARTA PROGRAMMET + UPPDATERINGSKONTROLL
-# ---------------------------------------------------------
 if __name__ == "__main__":
     app = TraceViewer()
 
@@ -384,7 +381,7 @@ if __name__ == "__main__":
     if update:
         if messagebox.askyesno(
             title="Ny version finns!",
-            message=f"Ny version ({latest}) finns på GitHub.\n\nVill du ladda ner den?"
+            message=f"Ny uppdatering finns på GitHub.\n\nVill du ladda ner den?"
         ):
             import webbrowser
             webbrowser.open(url)
