@@ -75,7 +75,6 @@ def load_version_info():
     return "unknown", "no summary"
 
 version, summary = load_version_info()
-print(version, summary)
 
 # ---------------------------------------------------------
 #  HÄMTA SENASTE VERSION FRÅN GITHUB
@@ -153,7 +152,7 @@ def parse_st_file(path):
 class TraceViewer(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f"Servotrace Viewer (840D PL) -- Skapad av Filip Haverinen ({summary})")
+        self.title(f"Servotrace Viewer (840D PL) -- Skapad av Filip Haverinen ({latest})")
         self.geometry("1500x900")
 
         self.traces_a = {}
@@ -374,16 +373,16 @@ class TraceViewer(tk.Tk):
         )
 
 if __name__ == "__main__":
-    app = TraceViewer()
-
+    save_if_new()
     update, latest, url = check_for_update(version, GITHUB_OWNER, GITHUB_REPO)
     print(version, latest)
+    app = TraceViewer()
     if update:
         if messagebox.askyesno(
-            title="Ny version finns!",
-            message=f"Ny uppdatering finns på GitHub.\n\nVill du ladda ner den?"
+            title="Uppdatering finns!",
+            message=f"Ny uppdatering finns på GitHub.\n\nNy version: {summary}\nAktuell version: {latest}\n\nVill du ladda ner den?"
         ):
             import webbrowser
             webbrowser.open(url)
-
+    
     app.mainloop()
