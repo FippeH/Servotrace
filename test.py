@@ -90,10 +90,18 @@ def get_latest_github_version(owner, repo):
 def check_for_update(local_version, owner, repo):
     try:
         latest, url = get_latest_github_version(owner, repo)
-        print(local_version, version, latest, url)
-        return summary != local_version, latest, url
+        
+        def normalize(v):
+            return v.split("-")[0].strip()
+
+        # Normalisera båda versionerna
+        lv = normalize(local_version).strip().replace("\ufeff", "")
+        gv = normalize(latest).strip().replace("\ufeff", "")
+
+        return gv != lv, gv, url
     except:
-        return False, None, None     
+        return False, None, None
+
 
 # ---------------------------------------------------------
 #  HÄMTA SENASTE ANVÄNDA ST-FILER
@@ -545,7 +553,7 @@ if __name__ == "__main__":
             title="Uppdatering finns!",
             message=f"Ny uppdatering finns på GitHub.\n\n"
                     f"Ny version: {latest}\n"
-                    f"Aktuell version: {summary}\n\n"
+                    f"Aktuell version: {version}\n\n"
                     f"Vill du ladda ner den?"
         ):
             import webbrowser
