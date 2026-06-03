@@ -16,6 +16,8 @@ import requests
 path = "_internal\\version.json"
 GITHUB_OWNER = "FippeH"
 GITHUB_REPO = "Servotrace"
+RECENT_PATH = "_internal\\recent_files.json"
+MAX_RECENT = 5
 
 # ---------------------------------------------------------
 #  HJÄLPFUNKTION: KÖR VI SOM EXE?
@@ -93,6 +95,38 @@ def check_for_update(local_version, owner, repo):
         return False, None, None
 
 # ---------------------------------------------------------
+#  HÄMTA SENASTE ANVÄNDA ST-FILER
+# ---------------------------------------------------------
+def load_recent_files():
+    if os.path.exists(RECENT_PATH):
+        try:
+            with open(RECENT_PATH, "r") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_recent_files(files):
+    os.makedirs(os.path.dirname(RECENT_PATH), exist_ok=True)
+    with open(RECENT_PATH, "w") as f:
+        json.dump(files, f, indent=2)
+
+def add_recent_file(path):
+    files = load_recent_files()
+
+    # Ta bort om den redan finns
+    if path in files:
+        files.remove(path)
+
+    # Lägg först i listan
+    files.insert(0, path)
+
+    # Begränsa antal
+    files = files[:MAX_RECENT]
+
+    save_recent_files(files)
+
+# ---------------------------------------------------------
 #  PARSER
 # ---------------------------------------------------------
 def parse_st_file(path):
@@ -152,9 +186,8 @@ def parse_st_file(path):
 class TraceViewer(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f"Servotrace Viewer (840D PL) -- Skapad av Filip Haverinen ({latest})")
+        self.title("Servotrace Viewer (840D PL) -- Skapad av Filip Haverinen")
         self.geometry("1500x900")
-
         self.traces_a = {}
         self.traces_b = {}
         self.trace_vars = {}
@@ -164,20 +197,136 @@ class TraceViewer(tk.Tk):
         style.configure("Big.TCheckbutton", font=("Segoe UI", 14))
 
         self.create_widgets()
-
+        self.create_menubar()
+  
     # ---------------------------------------------------------
     #  UI
     # ---------------------------------------------------------
+    def create_menubar(self):
+        menubar = tk.Menu(self)
+
+        # --- Arkiv ---
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Öppna Trace-fil 1", command=lambda: self.open_file("A"))
+        file_menu.add_command(label="Öppna Trace-fil 2", command=lambda: self.open_file("B"))
+        file_menu.add_separator()
+        file_menu.add_command(label="Exportera graf", command=self.export_png)
+        file_menu.add_separator()
+        self.config(menu=menubar)
+        self.recent_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_cascade(label="Senaste filerna", menu=self.recent_menu)
+        self.update_recent_menu()
+        file_menu.add_separator()
+        file_menu.add_command(label="Avsluta", command=self.quit)
+        menubar.add_cascade(label="Fil", menu=file_menu)
+
+        # --- Visa ---
+        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu.add_command(label="Stäng Trace-fil 1", command=lambda: self.close_file("A"))
+        view_menu.add_command(label="Stäng Trace-fil 2", command=lambda: self.close_file("B"))
+        view_menu.add_command(label="Stäng båda trace-filerna", command=self.close_all)
+        menubar.add_cascade(label="Visa", menu=view_menu)
+
+        # --- Hjälp ---
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="Sök efter uppdatering", command=self.check_update_from_menu)
+        help_menu.add_command(label="Om programmet", command=self.show_about)
+        menubar.add_cascade(label="Hjälp", menu=help_menu)
+
+    def show_about(self):
+        messagebox.showinfo(
+            "Om programmet",
+            f"Servotrace Viewer (840D PL)\n"
+            f"Skapad av Filip Haverinen\n\n"
+            f"Lokal version: {version}\n"
+            f"GitHub-version: {latest}\n"
+        )
+
+    def check_update_from_menu(self):
+        update, latest_remote, url = check_for_update(version, GITHUB_OWNER, GITHUB_REPO)
+
+        if update:
+            if messagebox.askyesno(
+                "Uppdatering finns!",
+                f"Ny version finns på GitHub.\n\n"
+                f"GitHub-version: {latest_remote}\n"
+                f"Lokal version: {latest}\n\n"
+                f"Vill du öppna nedladdningssidan?"
+            ):
+                import webbrowser
+                webbrowser.open(url)
+        else:
+            messagebox.showinfo("Ingen uppdatering", "Du har redan den senaste versionen.")
+    def export_png(self):
+        # Skapa en ny figur med samma innehåll som den som visas
+        fig = plt.Figure(figsize=(12, 6), dpi=100)
+        ax = fig.add_subplot(111)
+
+        # Rita om alla aktiva traces
+        for (label, trace_no), var in self.trace_vars.items():
+            if var.get():
+                if label == "A":
+                    tr = self.traces_a.get(trace_no)
+                else:
+                    tr = self.traces_b.get(trace_no)
+
+                if tr:
+                    self.plot_trace(ax, tr, trace_no, label, self.colors[(label, trace_no)])
+
+        ax.grid(True)
+        ax.legend()
+
+        # Filväljare
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG-bild", "*.png")],
+            title="Spara graf som PNG"
+        )
+
+        if filepath:
+            fig.savefig(filepath)
+            messagebox.showinfo("Sparad", f"Grafen sparades som:\n{filepath}")
+    
+    def update_recent_menu(self):
+        self.recent_menu.delete(0, "end")
+        files = load_recent_files()
+
+        if not files:
+            self.recent_menu.add_command(label="(Inga senaste filer)", state="disabled")
+            return
+
+        for fpath in files:
+            if os.path.exists(fpath):
+                self.recent_menu.add_command(
+                    label=fpath,
+                    command=lambda p=fpath: self.open_recent_file(p)
+                )
+            else:
+                # Ta bort filer som inte längre finns
+                files.remove(fpath)
+                save_recent_files(files)
+
+    def open_recent_file(self, filepath):
+        if not os.path.exists(filepath):
+            messagebox.showerror("Fel", "Filen finns inte längre.")
+            return
+
+        label = "A" if filepath.endswith("A") else "B"  # eller välj automatiskt
+
+        self.log(f"Läser fil (senaste): {filepath}")
+        traces = parse_st_file(filepath)
+
+        # Lägg in i A eller B beroende på vad du vill
+        self.traces_a = traces
+
+        add_recent_file(filepath)
+        self.update_recent_menu()
+        self.update_checkboxes()
+        self.update_plot()
+
     def create_widgets(self):
         top = ttk.Frame(self)
         top.pack(fill="x", pady=5)
-
-        ttk.Button(top, text="Öppna ST-fil A", command=lambda: self.open_file("A")).pack(side="left", padx=10)
-        ttk.Button(top, text="Öppna ST-fil B", command=lambda: self.open_file("B")).pack(side="left", padx=10)
-
-        ttk.Button(top, text="Stäng alla A", command=lambda: self.close_file("A")).pack(side="left", padx=10)
-        ttk.Button(top, text="Stäng alla B", command=lambda: self.close_file("B")).pack(side="left", padx=10)
-        ttk.Button(top, text="Stäng ALLT", command=self.close_all).pack(side="left", padx=10)
 
         main_frame = ttk.Frame(self)
         main_frame.pack(fill="both", expand=True)
@@ -190,6 +339,8 @@ class TraceViewer(tk.Tk):
 
         self.text_output = tk.Text(self, height=10, bg="#111", fg="#0f0", font=("Consolas", 10))
         self.text_output.pack(fill="x", padx=10, pady=5)
+        self.label = ttk.Label(text=f"Aktuell Version: {latest}")
+        self.label.pack(side="right", padx=5, pady=5)
 
     def log(self, msg):
         self.text_output.insert("end", msg + "\n")
@@ -215,6 +366,8 @@ class TraceViewer(tk.Tk):
 
         self.update_checkboxes()
         self.update_plot()
+        add_recent_file(filepath)
+        self.update_recent_menu()
 
     # ---------------------------------------------------------
     #  Stäng enskild trace
