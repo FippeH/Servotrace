@@ -3,7 +3,94 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import filedialog, ttk, messagebox
+import subprocess
+import json
+import os
+import sys
+import requests
+
+# ---------------------------------------------------------
+#  KONFIG
+# ---------------------------------------------------------
+path = "_internal\\version.json"
+GITHUB_OWNER = "Servotrace"
+GITHUB_REPO = "FippeH"
+
+# ---------------------------------------------------------
+#  HJÄLPFUNKTION: KÖR VI SOM EXE?
+# ---------------------------------------------------------
+def running_as_exe():
+    return getattr(sys, 'frozen', False)
+
+# ---------------------------------------------------------
+#  HÄMTA GIT-VERSION (PYTHON-LÄGE)
+# ---------------------------------------------------------
+def get_git_info():
+    if running_as_exe():
+        # EXE kan inte köra git → använd version.json
+        return version, summary
+
+    def run(cmd):
+        return subprocess.check_output(cmd, encoding="utf-8").strip()
+
+    try:
+        version = run(["git", "describe", "--tags", "--always"])
+        summary = run(["git", "log", "-1", "--pretty=%s"])
+        return version, summary
+    except Exception:
+        return "unknown", "no summary"
+
+# ---------------------------------------------------------
+#  SPARA VERSION (PYTHON-LÄGE)
+# ---------------------------------------------------------
+def save_if_new():
+    version, summary = get_git_info()
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            json.dump({"version": version, "summary": summary}, f)
+        return True
+
+    with open(path) as f:
+        old = json.load(f)
+
+    if old["summary"] != summary:
+        with open(path, "w") as f:
+            json.dump({"version": version, "summary": summary}, f)
+        return True
+
+    return False
+ 
+# ---------------------------------------------------------
+#  LÄS VERSION.JSON (PYTHON + EXE)
+# ---------------------------------------------------------
+def load_version_info():
+    if os.path.exists(path):
+        with open(path) as f:
+            data = json.load(f)
+            return data.get("version", "unknown"), data.get("summary", "no summary")
+    return "unknown", "no summary"
+
+version, summary = load_version_info()
+
+# ---------------------------------------------------------
+#  HÄMTA SENASTE VERSION FRÅN GITHUB
+# ---------------------------------------------------------
+def get_latest_github_version(owner, repo):
+    url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+    response = requests.get(url, timeout=5)
+    data = response.json()
+    return data["tag_name"], data["html_url"]
+
+def check_for_update(local_version, owner, repo):
+    try:
+        latest, url = get_latest_github_version(owner, repo)
+        return latest != local_version, latest, url
+    except:
+        return False, None, None
 
 # ---------------------------------------------------------
 #  PARSER
@@ -65,7 +152,7 @@ def parse_st_file(path):
 class TraceViewer(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Servotrace Veiwer (840D PL) V0.1 -- Skapad av Filip Haverinen")
+        self.title(f"Servotrace Viewer (840D PL) -- Skapad av Filip Haverinen ({summary})")
         self.geometry("1500x900")
 
         self.traces_a = {}
@@ -285,6 +372,21 @@ class TraceViewer(tk.Tk):
             f"Ymin={ymin} | Ymax={ymax} | Samples={len(val)} | Ts={Ts_ms:.6f} ms"
         )
 
+
+# ---------------------------------------------------------
+#  STARTA PROGRAMMET + UPPDATERINGSKONTROLL
+# ---------------------------------------------------------
 if __name__ == "__main__":
     app = TraceViewer()
+
+    update, latest, url = check_for_update(version, GITHUB_OWNER, GITHUB_REPO)
+    print(version, latest)
+    if update:
+        if messagebox.askyesno(
+            title="Ny version finns!",
+            message=f"Ny version ({latest}) finns på GitHub.\n\nVill du ladda ner den?"
+        ):
+            import webbrowser
+            webbrowser.open(url)
+
     app.mainloop()
