@@ -85,14 +85,15 @@ def get_latest_github_version(owner, repo):
     url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
     response = requests.get(url, timeout=5)
     data = response.json()
-    return data["name"], data["html_url"]
+    return data["tag_name"], data["html_url"]
 
 def check_for_update(local_version, owner, repo):
     try:
         latest, url = get_latest_github_version(owner, repo)
+        print(local_version, version)
         return latest != local_version, latest, url
     except:
-        return False, None, None
+        return False, None, None     
 
 # ---------------------------------------------------------
 #  HÄMTA SENASTE ANVÄNDA ST-FILER
@@ -244,7 +245,6 @@ class TraceViewer(tk.Tk):
 
     def check_update_from_menu(self):
         update, latest_remote, url = check_for_update(version, GITHUB_OWNER, GITHUB_REPO)
-
         if update:
             if messagebox.askyesno(
                 "Uppdatering finns!",
@@ -257,6 +257,7 @@ class TraceViewer(tk.Tk):
                 webbrowser.open(url)
         else:
             messagebox.showinfo("Ingen uppdatering", "Du har redan den senaste versionen.")
+
     def export_png(self):
         # Skapa en ny figur med samma innehåll som den som visas
         fig = plt.Figure(figsize=(12, 6), dpi=100)
@@ -526,15 +527,28 @@ class TraceViewer(tk.Tk):
         )
 
 if __name__ == "__main__":
-    save_if_new()
+
+    # Uppdatera version.json i Python-läge
+    if not running_as_exe():
+        save_if_new()
+
+    # Läs version.json ALLTID efter save_if_new()
+    version, summary = load_version_info()
+
+    # Hämta GitHub-version
     update, latest, url = check_for_update(version, GITHUB_OWNER, GITHUB_REPO)
+
     app = TraceViewer()
+
     if update:
         if messagebox.askyesno(
             title="Uppdatering finns!",
-            message=f"Ny uppdatering finns på GitHub.\n\nNy version: {summary}\nAktuell version: {latest}\n\nVill du ladda ner den?"
+            message=f"Ny uppdatering finns på GitHub.\n\n"
+                    f"Ny version: {latest}\n"
+                    f"Aktuell version: {version}\n\n"
+                    f"Vill du ladda ner den?"
         ):
             import webbrowser
             webbrowser.open(url)
-    
+
     app.mainloop()
