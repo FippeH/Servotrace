@@ -90,8 +90,8 @@ def get_latest_github_version(owner, repo):
 def check_for_update(local_version, owner, repo):
     try:
         latest, url = get_latest_github_version(owner, repo)
-        print(local_version, version)
-        return latest != local_version, latest, url
+        print(local_version, version, latest, url)
+        return summary != local_version, latest, url
     except:
         return False, None, None     
 
@@ -340,7 +340,7 @@ class TraceViewer(tk.Tk):
 
         self.text_output = tk.Text(self, height=10, bg="#111", fg="#0f0", font=("Consolas", 10))
         self.text_output.pack(fill="x", padx=10, pady=5)
-        self.label = ttk.Label(text=f"Aktuell Version: {latest}")
+        self.label = ttk.Label(text=f"Aktuell Version: {summary}")
         self.label.pack(side="right", padx=5, pady=5)
 
     def log(self, msg):
@@ -545,7 +545,7 @@ if __name__ == "__main__":
             title="Uppdatering finns!",
             message=f"Ny uppdatering finns på GitHub.\n\n"
                     f"Ny version: {latest}\n"
-                    f"Aktuell version: {version}\n\n"
+                    f"Aktuell version: {summary}\n\n"
                     f"Vill du ladda ner den?"
         ):
             import webbrowser
