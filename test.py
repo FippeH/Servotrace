@@ -375,7 +375,6 @@ class TraceViewer(tk.Tk):
 if __name__ == "__main__":
     save_if_new()
     update, latest, url = check_for_update(version, GITHUB_OWNER, GITHUB_REPO)
-    print(version, latest)
     app = TraceViewer()
     if update:
         if messagebox.askyesno(
