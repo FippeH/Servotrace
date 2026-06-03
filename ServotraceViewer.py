@@ -557,5 +557,5 @@ if __name__ == "__main__":
         ):
             import webbrowser
             webbrowser.open(url)
-
+    print("Testar funktionskontrollen")
     app.mainloop()
