@@ -13,94 +13,13 @@ import requests
 # ---------------------------------------------------------
 #  KONFIG
 # ---------------------------------------------------------
+version = "260603H"
+
 path = "_internal\\version.json"
 GITHUB_OWNER = "FippeH"
 GITHUB_REPO = "Servotrace"
 RECENT_PATH = "_internal\\recent_files.json"
 MAX_RECENT = 5
-
-# ---------------------------------------------------------
-#  HJÄLPFUNKTION: KÖR VI SOM EXE?
-# ---------------------------------------------------------
-def running_as_exe():
-    return getattr(sys, 'frozen', False)
-
-# ---------------------------------------------------------
-#  HÄMTA GIT-VERSION (PYTHON-LÄGE)
-# ---------------------------------------------------------
-def get_git_info():
-    if running_as_exe():
-        # EXE kan inte köra git → använd version.json
-        return version, summary
-
-    def run(cmd):
-        return subprocess.check_output(cmd, encoding="utf-8").strip()
-
-    try:
-        version = run(["git", "describe", "--tags", "--always"])
-        summary = run(["git", "log", "-1", "--pretty=%s"])
-        return version, summary
-    except Exception:
-        return "unknown", "no summary"
-
-# ---------------------------------------------------------
-#  SPARA VERSION (PYTHON-LÄGE)
-# ---------------------------------------------------------
-def save_if_new():
-    version, summary = get_git_info()
-
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-
-    if not os.path.exists(path):
-        with open(path, "w") as f:
-            json.dump({"version": version, "summary": summary}, f)
-        return True
-
-    with open(path) as f:
-        old = json.load(f)
-
-    if old["summary"] != summary:
-        with open(path, "w") as f:
-            json.dump({"version": version, "summary": summary}, f)
-        return True
-
-    return False
- 
-# ---------------------------------------------------------
-#  LÄS VERSION.JSON (PYTHON + EXE)
-# ---------------------------------------------------------
-def load_version_info():
-    if os.path.exists(path):
-        with open(path) as f:
-            data = json.load(f)
-            return data.get("version", "unknown"), data.get("summary", "no summary")
-    return "unknown", "no summary"
-
-version, summary = load_version_info()
-
-# ---------------------------------------------------------
-#  HÄMTA SENASTE VERSION FRÅN GITHUB
-# ---------------------------------------------------------
-def get_latest_github_version(owner, repo):
-    url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-    response = requests.get(url, timeout=5)
-    data = response.json()
-    return data["tag_name"], data["html_url"]
-
-def check_for_update(local_version, owner, repo):
-    try:
-        latest, url = get_latest_github_version(owner, repo)
-        
-        def normalize(v):
-            return v.split("-")[0].strip()
-
-        # Normalisera båda versionerna
-        lv = normalize(local_version).strip().replace("\ufeff", "")
-        gv = normalize(latest).strip().replace("\ufeff", "")
-
-        return gv != lv, gv, url
-    except:
-        return False, None, None
 
 # ---------------------------------------------------------
 #  HÄMTA SENASTE ANVÄNDA ST-FILER
@@ -237,7 +156,6 @@ class TraceViewer(tk.Tk):
 
         # --- Hjälp ---
         help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(label="Sök efter uppdatering", command=self.check_update_from_menu)
         help_menu.add_command(label="Om programmet", command=self.show_about)
         menubar.add_cascade(label="Hjälp", menu=help_menu)
 
@@ -246,24 +164,7 @@ class TraceViewer(tk.Tk):
             "Om programmet",
             f"Servotrace Viewer (840D PL)\n"
             f"Skapad av Filip Haverinen\n\n"
-            f"Lokal version: {version}\n"
-            f"GitHub-version: {latest}\n"
         )
-
-    def check_update_from_menu(self):
-        update, latest_remote, url = check_for_update(version, GITHUB_OWNER, GITHUB_REPO)
-        if update:
-            if messagebox.askyesno(
-                "Uppdatering finns!",
-                f"Ny version finns på GitHub.\n\n"
-                f"GitHub-version: {latest_remote}\n"
-                f"Lokal version: {version}\n\n"
-                f"Vill du öppna nedladdningssidan?"
-            ):
-                import webbrowser
-                webbrowser.open(url)
-        else:
-            messagebox.showinfo("Ingen uppdatering", "Du har redan den senaste versionen.")
 
     def export_png(self):
         # Skapa en ny figur med samma innehåll som den som visas
@@ -534,28 +435,5 @@ class TraceViewer(tk.Tk):
         )
 
 if __name__ == "__main__":
-
-    # Uppdatera version.json i Python-läge
-    if not running_as_exe():
-        save_if_new()
-
-    # Läs version.json ALLTID efter save_if_new()
-    version, summary = load_version_info()
-
-    # Hämta GitHub-version
-    update, latest, url = check_for_update(version, GITHUB_OWNER, GITHUB_REPO)
-
     app = TraceViewer()
-
-    if update:
-        if messagebox.askyesno(
-            title="Uppdatering finns!",
-            message=f"Ny uppdatering finns på GitHub.\n\n"
-                    f"Ny version: {latest}\n"
-                    f"Aktuell version: {version}\n\n"
-                    f"Vill du ladda ner den?"
-        ):
-            import webbrowser
-            webbrowser.open(url)
-    print("Testar funktionskontrollen")
     app.mainloop()
