@@ -4,20 +4,14 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
-import subprocess
+from tkinter.colorchooser import askcolor
 import json
 import os
-import sys
-import requests
 
 # ---------------------------------------------------------
 #  KONFIG
 # ---------------------------------------------------------
-version = "260603H"
-
-path = "_internal\\version.json"
-GITHUB_OWNER = "FippeH"
-GITHUB_REPO = "Servotrace"
+version = "260605A"
 RECENT_PATH = "_internal\\recent_files.json"
 MAX_RECENT = 5
 
@@ -40,17 +34,10 @@ def save_recent_files(files):
 
 def add_recent_file(path):
     files = load_recent_files()
-
-    # Ta bort om den redan finns
     if path in files:
         files.remove(path)
-
-    # Lägg först i listan
     files.insert(0, path)
-
-    # Begränsa antal
     files = files[:MAX_RECENT]
-
     save_recent_files(files)
 
 # ---------------------------------------------------------
@@ -95,7 +82,6 @@ def parse_st_file(path):
                     traces[current_trace]["idx"].append(idx)
                     traces[current_trace]["val"].append(val)
 
-    # Sortera samples
     for tr in traces.values():
         if tr["idx"]:
             arr = np.array(sorted(zip(tr["idx"], tr["val"])))
@@ -114,78 +100,83 @@ class TraceViewer(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Servotrace Viewer (840D PL) -- Skapad av Filip Haverinen")
-        self.geometry("1500x900")
+        self.geometry("1460x830")
+        self.minsize(width=1460, height=830)
+        self.state("zoomed")
         self.traces_a = {}
         self.traces_b = {}
         self.trace_vars = {}
         self.colors = {}
+        self.iconbitmap("_internal\\Servotrace.ico")
 
         style = ttk.Style()
         style.configure("Big.TCheckbutton", font=("Segoe UI", 14))
-
+        self.suppress_log = False
         self.create_widgets()
         self.create_menubar()
-  
+
     # ---------------------------------------------------------
-    #  UI
+    #  MENYBAR
     # ---------------------------------------------------------
     def create_menubar(self):
         menubar = tk.Menu(self)
 
-        # --- Arkiv ---
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Öppna Trace-fil 1", command=lambda: self.open_file("A"))
         file_menu.add_command(label="Öppna Trace-fil 2", command=lambda: self.open_file("B"))
         file_menu.add_separator()
         file_menu.add_command(label="Exportera graf", command=self.export_png)
         file_menu.add_separator()
-        self.config(menu=menubar)
+
         self.recent_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_cascade(label="Senaste filerna", menu=self.recent_menu)
         self.update_recent_menu()
+
         file_menu.add_separator()
         file_menu.add_command(label="Avsluta", command=self.quit)
         menubar.add_cascade(label="Fil", menu=file_menu)
 
-        # --- Visa ---
         view_menu = tk.Menu(menubar, tearoff=0)
         view_menu.add_command(label="Stäng Trace-fil 1", command=lambda: self.close_file("A"))
         view_menu.add_command(label="Stäng Trace-fil 2", command=lambda: self.close_file("B"))
         view_menu.add_command(label="Stäng båda trace-filerna", command=self.close_all)
         menubar.add_cascade(label="Visa", menu=view_menu)
 
-        # --- Hjälp ---
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="Om programmet", command=self.show_about)
         menubar.add_cascade(label="Hjälp", menu=help_menu)
 
+        self.config(menu=menubar)
+
+    # ---------------------------------------------------------
+    #  ABOUT
+    # ---------------------------------------------------------
     def show_about(self):
         messagebox.showinfo(
             "Om programmet",
             f"Servotrace Viewer (840D PL)\n"
             f"Skapad av Filip Haverinen\n\n"
+            f"Vid förbättringar eller buggfixar kontakta Filip Haverinen.\n\n"
+            f"Telefon: 0728624550\n"
+            f"E-post: filip.haverinen@volvo.com"
         )
 
+    # ---------------------------------------------------------
+    #  EXPORT PNG
+    # ---------------------------------------------------------
     def export_png(self):
-        # Skapa en ny figur med samma innehåll som den som visas
         fig = plt.Figure(figsize=(12, 6), dpi=100)
         ax = fig.add_subplot(111)
 
-        # Rita om alla aktiva traces
         for (label, trace_no), var in self.trace_vars.items():
             if var.get():
-                if label == "A":
-                    tr = self.traces_a.get(trace_no)
-                else:
-                    tr = self.traces_b.get(trace_no)
-
+                tr = self.traces_a.get(trace_no) if label == "A" else self.traces_b.get(trace_no)
                 if tr:
                     self.plot_trace(ax, tr, trace_no, label, self.colors[(label, trace_no)])
 
         ax.grid(True)
         ax.legend()
 
-        # Filväljare
         filepath = filedialog.asksaveasfilename(
             defaultextension=".png",
             filetypes=[("PNG-bild", "*.png")],
@@ -195,7 +186,11 @@ class TraceViewer(tk.Tk):
         if filepath:
             fig.savefig(filepath)
             messagebox.showinfo("Sparad", f"Grafen sparades som:\n{filepath}")
-    
+            self.log(f"Grafen sparades under: {filepath}")
+
+    # ---------------------------------------------------------
+    #  RECENT FILES
+    # ---------------------------------------------------------
     def update_recent_menu(self):
         self.recent_menu.delete(0, "end")
         files = load_recent_files()
@@ -210,55 +205,77 @@ class TraceViewer(tk.Tk):
                     label=fpath,
                     command=lambda p=fpath: self.open_recent_file(p)
                 )
-            else:
-                # Ta bort filer som inte längre finns
-                files.remove(fpath)
-                save_recent_files(files)
 
     def open_recent_file(self, filepath):
         if not os.path.exists(filepath):
             messagebox.showerror("Fel", "Filen finns inte längre.")
             return
 
-        label = "A" if filepath.endswith("A") else "B"  # eller välj automatiskt
-
         self.log(f"Läser fil (senaste): {filepath}")
-        traces = parse_st_file(filepath)
-
-        # Lägg in i A eller B beroende på vad du vill
-        self.traces_a = traces
+        self.traces_a = parse_st_file(filepath)
 
         add_recent_file(filepath)
         self.update_recent_menu()
         self.update_checkboxes()
         self.update_plot()
 
+    # ---------------------------------------------------------
+    #  UI SETUP
+    # ---------------------------------------------------------
     def create_widgets(self):
-        top = ttk.Frame(self)
-        top.pack(fill="x", pady=5)
-
         main_frame = ttk.Frame(self)
         main_frame.pack(fill="both", expand=True)
 
         self.left_panel = ttk.Frame(main_frame, width=300)
         self.left_panel.pack(side="left", fill="y")
+        self.left_panel.pack_propagate(False)
 
         self.plot_frame = ttk.Frame(main_frame)
         self.plot_frame.pack(side="right", fill="both", expand=True)
 
-        self.text_output = tk.Text(self, height=10, bg="#111", fg="#0f0", font=("Consolas", 10))
-        self.text_output.pack(fill="x", padx=10, pady=5)
+        terminal_frame = ttk.Frame(self)
+        terminal_frame.pack(fill="x", padx=10, pady=5)
+
+        scrollbar = ttk.Scrollbar(terminal_frame)
+        scrollbar.pack(side="right", fill="y")
+        
+        self.text_output = tk.Text(
+            terminal_frame,
+            height=10,
+            bg="#111",
+            fg="#0f0",
+            font=("Consolas", 16),
+            yscrollcommand=scrollbar.set
+        )
+        self.text_output.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=self.text_output.yview)
+        self.text_output.bind("<MouseWheel>", self._on_mousewheel)
+    
+        self.clear_terminal = ttk.Button(text="Rensa terminalen", command=self.clear_log)
+        self.clear_terminal.pack(side="left", padx=5, pady=5)
         self.label = ttk.Label(text=f"Aktuell Version: {version}")
         self.label.pack(side="right", padx=5, pady=5)
+
+        self.update_checkboxes()
+        self.update_plot()
+        
+    def _on_mousewheel(self, event):
+            self.text_output.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def log(self, msg):
         self.text_output.insert("end", msg + "\n")
         self.text_output.see("end")
 
+    def clear_log(self):
+        self.text_output.delete("1.0", tk.END)
+        self.log(f"Terminalen rensad")
+        self.after(2000, lambda: self.text_output.delete("1.0", tk.END))
+
     # ---------------------------------------------------------
     #  Öppna fil
     # ---------------------------------------------------------
     def open_file(self, label):
+        self.suppress_log = False
         filepath = filedialog.askopenfilename(
             title=f"Välj ST-fil {label}",
             filetypes=[("ST filer", "*.ST1 *.ST2"), ("Alla filer", "*.*")]
@@ -273,10 +290,10 @@ class TraceViewer(tk.Tk):
         else:
             self.traces_b = parse_st_file(filepath)
 
-        self.update_checkboxes()
-        self.update_plot()
         add_recent_file(filepath)
         self.update_recent_menu()
+        self.update_checkboxes()
+        self.update_plot()
 
     # ---------------------------------------------------------
     #  Stäng enskild trace
@@ -292,6 +309,7 @@ class TraceViewer(tk.Tk):
 
         self.update_checkboxes()
         self.update_plot()
+        self.after(2000, lambda: self.text_output.delete("1.0", tk.END))
 
     # ---------------------------------------------------------
     #  Stäng alla i en fil
@@ -306,6 +324,7 @@ class TraceViewer(tk.Tk):
 
         self.update_checkboxes()
         self.update_plot()
+        self.after(2000, lambda: self.text_output.delete("1.0", tk.END))
 
     # ---------------------------------------------------------
     #  Stäng ALLT
@@ -316,6 +335,7 @@ class TraceViewer(tk.Tk):
         self.log("Stängde ALLA traces.")
         self.update_checkboxes()
         self.update_plot()
+        self.after(2000, lambda: self.text_output.delete("1.0", tk.END))
 
     # ---------------------------------------------------------
     #  Checkbox-lista
@@ -324,8 +344,10 @@ class TraceViewer(tk.Tk):
         for widget in self.left_panel.winfo_children():
             widget.destroy()
 
+        title = ttk.Label(self.left_panel, text="AKTUELLA FILER", font=("Segoe UI", 16, "bold"))
+        title.pack(anchor="n", padx=10, pady=(5, 10))
+
         self.trace_vars.clear()
-        self.colors.clear()
 
         all_traces = []
 
@@ -336,6 +358,19 @@ class TraceViewer(tk.Tk):
             all_traces.append(("B", tr, self.traces_b[tr]))
 
         for i, (label, trace_no, tr) in enumerate(all_traces):
+
+            # Defaultfärg i HEX
+            if (label, trace_no) not in self.colors:
+                palette_A = ["#0070ff", "#ff0000"]
+                palette_B = ["#00cc00", "#9900ff"]
+
+                if label == "A":
+                    palette = palette_A
+                else:
+                    palette = palette_B
+                
+                self.colors[(label, trace_no)] = palette[i % 2]
+
             row = ttk.Frame(self.left_panel)
             row.pack(anchor="w", padx=10, pady=3, fill="x")
 
@@ -345,12 +380,21 @@ class TraceViewer(tk.Tk):
                 row,
                 text=f"{label}: Trace {trace_no}",
                 variable=var,
-                command=self.update_plot,
+                command=lambda L=label, T=trace_no: self.on_checkbox_toggle(L, T),
                 style="Big.TCheckbutton"
             )
             cb.pack(side="left")
 
-            # X-knapp för att stänga en trace
+            # --- Färgknapp ---
+            color_btn = tk.Button(
+                row,
+                width=2,
+                bg=self.colors[(label, trace_no)],
+                command=lambda L=label, T=trace_no: self.change_color(L, T)
+            )
+            color_btn.pack(side="right", padx=5)
+
+            # --- X-knapp ---
             btn = ttk.Button(
                 row,
                 text="X",
@@ -360,38 +404,111 @@ class TraceViewer(tk.Tk):
             btn.pack(side="right", padx=5)
 
             self.trace_vars[(label, trace_no)] = var
-            self.colors[(label, trace_no)] = plt.cm.tab20(i % 20)
+
+    def on_checkbox_toggle(self, label, trace_no):
+        self.suppress_log = True
+        self.update_plot()
 
     # ---------------------------------------------------------
-    #  Rita graf
+    #  Färgbyte
     # ---------------------------------------------------------
     def update_plot(self):
         for widget in self.plot_frame.winfo_children():
             widget.destroy()
 
         fig = plt.Figure(figsize=(12, 6), dpi=100)
-        ax = fig.add_subplot(111)
+        ax_left = fig.add_subplot(111)
+        ax_right = ax_left.twinx()
 
-        any_plotted = False
+        # Samla alla aktiva traces
+        active = []  # (label, trace_no, tr, mean, rng)
 
-        # Rita A
-        for trace_no, tr in self.traces_a.items():
-            key = ("A", trace_no)
-            if key in self.trace_vars and self.trace_vars[key].get():
-                self.plot_trace(ax, tr, trace_no, "A", self.colors[key])
-                any_plotted = True
+        for label, traces in [("A", self.traces_a), ("B", self.traces_b)]:
+            for trace_no, tr in traces.items():
+                key = (label, trace_no)
+                if key in self.trace_vars and self.trace_vars[key].get():
+                    vals = np.array(tr["val"])
+                    if len(vals) == 0:
+                        continue
+                    mean = np.mean(vals)
+                    rng = max(abs(vals.min() - mean), abs(vals.max() - mean))
+                    active.append((label, trace_no, tr, mean, rng))
 
-        # Rita B
-        for trace_no, tr in self.traces_b.items():
-            key = ("B", trace_no)
-            if key in self.trace_vars and self.trace_vars[key].get():
-                self.plot_trace(ax, tr, trace_no, "B", self.colors[key])
-                any_plotted = True
+        if not active:
+            canvas = FigureCanvasTkAgg(fig, master=self.plot_frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill="both", expand=True)
+            return
 
-        if any_plotted:
-            ax.grid(True)
-            ax.legend()
+        # Sortera efter range
+        active.sort(key=lambda x: x[4], reverse=True)
 
+        # Gruppindelning:
+        # Största signalen definierar vänster-gruppen
+        # Näst största definierar höger-gruppen
+        left_group = []
+        right_group = []
+
+        if len(active) == 1:
+            left_group = active
+        else:
+            # Första = vänster
+            left_group.append(active[0])
+
+            # Andra = höger
+            right_group.append(active[1])
+
+            # Övriga: välj grupp baserat på vilken mean de ligger närmast
+            left_mean = active[0][3]
+            right_mean = active[1][3]
+
+            for item in active[2:]:
+                _, _, _, mean, _ = item
+                if abs(mean - left_mean) < abs(mean - right_mean):
+                    left_group.append(item)
+                else:
+                    right_group.append(item)
+
+        # Rita vänster grupp
+        for label, trace_no, tr, mean, rng in left_group:
+            self.plot_trace(ax_left, tr, trace_no, label, self.colors[(label, trace_no)])
+
+        # Rita höger grupp
+        for label, trace_no, tr, mean, rng in right_group:
+            self.plot_trace(ax_right, tr, trace_no, label, self.colors[(label, trace_no)])
+
+        # Grid
+        ax_left.grid(True)
+
+        # Legend
+        handles_left, labels_left = ax_left.get_legend_handles_labels()
+        handles_right, labels_right = ax_right.get_legend_handles_labels()
+        ax_left.legend(handles_left + handles_right, labels_left + labels_right, loc="upper right")
+
+        # Synka axlar
+        if left_group and right_group:
+            left_mean = left_group[0][3]
+            left_range = left_group[0][4]
+
+            right_mean = right_group[0][3]
+            right_range = right_group[0][4]
+
+            common_range = max(left_range, right_range)
+
+            ax_left.set_ylim(left_mean - common_range, left_mean + common_range)
+            ax_right.set_ylim(right_mean - common_range, right_mean + common_range)
+
+        elif left_group:
+            mean = left_group[0][3]
+            rng = left_group[0][4]
+            ax_left.set_ylim(mean - rng, mean + rng)
+
+        elif right_group:
+            mean = right_group[0][3]
+            rng = right_group[0][4]
+            ax_right.set_ylim(mean - rng, mean + rng)
+
+        # Rendera
         canvas = FigureCanvasTkAgg(fig, master=self.plot_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill="both", expand=True)
@@ -403,6 +520,25 @@ class TraceViewer(tk.Tk):
     # ---------------------------------------------------------
     #  Rita en trace
     # ---------------------------------------------------------
+    def change_color(self, label, trace_no):
+        # Öppna färgväljaren
+        color = askcolor(title="Välj färg")[1]
+        if not color:
+            return
+
+        # Spara färgen
+        self.colors[(label, trace_no)] = color
+
+        self.suppress_log = True
+
+        # Uppdatera checkbox-listan så färgknappen byter färg
+        self.update_checkboxes()
+
+        # Rita om grafen
+        self.update_plot()
+
+        self.suppress_log = False
+
     def plot_trace(self, ax, tr, trace_no, label, color):
         params = tr["params"]
         val = tr["val"]
@@ -429,10 +565,11 @@ class TraceViewer(tk.Tk):
             color=color
         )
 
-        self.log(
-            f"{label}: Trace {trace_no} | Axel={axis_id} | Enhet={unit} | "
-            f"Ymin={ymin} | Ymax={ymax} | Samples={len(val)} | Ts={Ts_ms:.6f} ms"
-        )
+        if not self.suppress_log:
+            self.log(
+                f"{label}: Trace {trace_no} | Axel={axis_id} | Enhet={unit} | "
+                f"Ymin={ymin} | Ymax={ymax} | Samples={len(val)} | Ts={Ts_ms:.6f} ms"
+            )
 
 if __name__ == "__main__":
     app = TraceViewer()
